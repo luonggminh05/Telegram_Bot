@@ -19,12 +19,12 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-const ADMIN_CHAT_ID = "6937078086"; // ID Telegram của Mẹ
+const ADMIN_CHAT_ID = "6937078086"; 
 
 let menu = [];
 let toppings = [];
 const userState = {};
-const pendingOrders = {}; // Lưu trữ đơn hàng chờ thanh toán
+const pendingOrders = {}; 
 
 function loadData() {
     return new Promise((resolve) => {
@@ -257,8 +257,6 @@ bot.on('callback_query', async (q) => {
         try {
             bot.sendMessage(chatId, '⏳ Đang tạo link thanh toán, chờ mình xíu nha...');
             const orderCode = Number(String(Date.now()).slice(-6));
-            
-            // Lưu dữ liệu vào pendingOrders để dùng khi Webhook gọi về
             pendingOrders[orderCode] = {
                 chatId: chatId,
                 stateSnapshot: JSON.parse(JSON.stringify(state))
@@ -295,29 +293,22 @@ async function processNextItemDetail(chatId) {
     });
 }
 
-// WEBHOOK THỰC TẾ
+// WEBHOOK 
 app.post('/payos-webhook', async (req, res) => {
+    res.sendStatus(200); 
+
     try {
+        if (req.body.desc === "confirm-webhook") {
+            return console.log("✅ PayOS đã xác nhận Webhook thành công!");
+        }
         const webhookData = payos.verifyWebhookData(req.body);
         const { orderCode, success } = webhookData;
 
         if (success && pendingOrders[orderCode]) {
-            const { chatId, stateSnapshot } = pendingOrders[orderCode];
-            stateSnapshot.payment_status = 'paid';
-            const orderText = buildFinalOrderText(stateSnapshot);
-
-            await bot.sendMessage(chatId, '✅ Thanh toán thành công! Minh chuẩn bị đơn ngay nha 🧋❤️');
-            await bot.sendMessage(chatId, orderText);
-            
-            notifyAdmin(orderText, true);
-
-            delete pendingOrders[orderCode];
-            delete userState[chatId];
+            console.log(`✅ Đơn hàng ${orderCode} đã thanh toán thành công!`);
         }
-        res.sendStatus(200);
     } catch (err) {
-        console.error("Webhook error:", err);
-        res.sendStatus(400);
+        console.error("❌ Lỗi xử lý Webhook:", err.message);
     }
 });
 
