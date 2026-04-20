@@ -15,7 +15,7 @@ const payos = new PayOS(
     process.env.PAYOS_CHECKSUM_KEY
 );
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN);
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -313,4 +313,15 @@ app.post('/payos-webhook', async (req, res) => {
     }
 });
 
-loadData().then(() => app.listen(process.env.PORT || 3000, () => console.log('🚀 Bot Ready!')));
+loadData().then(() => {
+    app.listen(process.env.PORT || 3000, () => {
+        const webhookUrl = `https://telegrambot-production-4421.up.railway.app/bot${process.env.BOT_TOKEN}`;
+        bot.setWebHook(webhookUrl);
+        console.log('🚀 Bot Ready!');
+    });
+});
+
+app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
