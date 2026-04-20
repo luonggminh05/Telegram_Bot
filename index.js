@@ -28,7 +28,7 @@ const pendingOrders = {}; // Lưu trữ đơn hàng chờ thanh toán
 
 function loadData() {
     return new Promise((resolve) => {
-        fs.createReadStream('menu.csv')
+        fs.createReadStream('Menu.csv')
             .pipe(csv())
             .on('data', (row) => {
                 if (row.available !== 'true') return;
