@@ -625,6 +625,7 @@ bot.on('callback_query', async (q) => {
         bot.sendMessage(chatId, 'Mình nhận đơn rồi nha! Đợi mình một xíu ❤️');
         notifyAdmin(orderText, false);
         delete userState[chatId];
+        return bot.answerCallbackQuery(q.id);
     }
 
     if (data === 'pay_transfer') {
@@ -693,9 +694,9 @@ app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
 // START
 loadData().then(async () => {
     const PORT = process.env.PORT || 3000;
-   const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN 
-    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : process.env.BASE_URL;
+    const BASE_URL = process.env.RAILWAY_STATIC_URL
+        ? `https://${process.env.RAILWAY_STATIC_URL}`
+        : process.env.BASE_URL;
 
     app.listen(PORT, async () => {
         console.log(`🚀 Server up on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
