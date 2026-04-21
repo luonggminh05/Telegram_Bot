@@ -706,8 +706,8 @@ app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
 // START
 loadData().then(async () => {
     const PORT = process.env.PORT || 3000;
-    const BASE_URL = process.env.RAILWAY_STATIC_URL
-        ? `https://${process.env.RAILWAY_STATIC_URL}`
+    const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
+        ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
         : process.env.BASE_URL;
 
     app.listen(PORT, async () => {
@@ -717,9 +717,9 @@ loadData().then(async () => {
             const WEBHOOK_URL = `${BASE_URL}/bot${process.env.BOT_TOKEN}`;
             await bot.deleteWebHook();
             await bot.setWebHook(WEBHOOK_URL);
-            console.log('✅ Webhook set:', WEBHOOK_URL);
+            console.log(' Webhook set:', WEBHOOK_URL);
         } else {
-            console.warn('⚠️  BASE_URL chưa set — webhook chưa được đăng ký!');
+            console.warn('BASE_URL chưa set — webhook chưa được đăng ký!');
         }
     });
 });
