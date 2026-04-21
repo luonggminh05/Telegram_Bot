@@ -668,32 +668,42 @@ bot.on('callback_query', async (q) => {
 });
 
 // PAYOS WEBHOOK
+const { verifyPaymentWebhookData } = require('@payos/node');
+
 app.post('/payos-webhook', async (req, res) => {
     res.sendStatus(200);
 
     try {
-        if (req.body.desc === "confirm-webhook") {
-            return console.log("✅ PayOS đã xác nhận Webhook thành công!");
-        }
+        console.log(" Webhook nhận:", req.body.toString());
 
-        const webhookData = payos.verifyPaymentWebhookData(req.body);
-        const { orderCode, success } = webhookData;
+        const data = verifyPaymentWebhookData(
+            req.body,
+            process.env.PAYOS_CHECKSUM_KEY
+        );
+
+        console.log(" Verify OK:", data);
+
+        const { orderCode, success } = data;
 
         if (success && pendingOrders[orderCode]) {
             const { chatId, stateSnapshot } = pendingOrders[orderCode];
+
             stateSnapshot.payment_status = 'paid';
             const orderText = buildFinalOrderText(stateSnapshot);
 
-            bot.sendMessage(chatId, '✅ Thanh toán thành công! Mình nhận đơn rồi nha ❤️\n\n' + orderText);
+            bot.sendMessage(chatId, 'Thanh toán thành công!\n\n' + orderText);
             notifyAdmin(orderText, true);
 
             delete pendingOrders[orderCode];
             delete userState[chatId];
 
-            console.log(`✅ Đơn hàng ${orderCode} đã thanh toán thành công!`);
+            console.log("DONE order:", orderCode);
+        } else {
+            console.log(" Không tìm thấy order hoặc chưa success");
         }
+
     } catch (err) {
-        console.error("❌ Lỗi xử lý Webhook:", err.message);
+        console.error(" Verify fail:", err.message);
     }
 });
 
