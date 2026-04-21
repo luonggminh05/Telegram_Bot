@@ -61,7 +61,7 @@ function buildFinalOrderText(state) {
     const optionLabel = { instore: 'Tại quán 🪑', takeaway: 'Mang đi 🥡', ship: 'Giao hàng 🚚' };
     const statusLabel = { cod: 'Thanh toán khi nhận món 🤝', paid: 'Đã thanh toán ✅', cash: 'Tiền mặt 💵' };
 
-    let text = '==== HOA DON DAT HANG ====\n';
+    let text = 'Hóa Đơn Thanh Toán\n';
     text += 'Hình thức: ' + optionLabel[state.dining_option] + '\n';
     text += 'SDT: ' + state.phone + '\n';
     if (state.dining_option === 'ship') text += 'Địa chỉ: ' + state.address + '\n';
@@ -79,7 +79,7 @@ function buildFinalOrderText(state) {
     text += '--------------------------\n';
     text += 'Tổng tiền: ' + formatMoney(calcTotal(state.cart)) + '\n';
     text += 'Trạng thái: ' + statusLabel[state.payment_status] + '\n';
-    text += '==========================';
+    text += 'Cảm ơn quý khách!';
     return text;
 }
 
