@@ -17,7 +17,7 @@ const payos = new PayOS(
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
 const ADMIN_CHAT_ID = "6937078086";
 
@@ -61,7 +61,7 @@ function buildFinalOrderText(state) {
     const optionLabel = { instore: 'Tại quán 🪑', takeaway: 'Mang đi 🥡', ship: 'Giao hàng 🚚' };
     const statusLabel = { cod: 'Thanh toán khi nhận món 🤝', paid: 'Đã thanh toán ✅', cash: 'Tiền mặt 💵' };
 
-    let text = 'Hóa Đơn Thanh Toán\n';
+    let text = 'HÓA ĐƠN THANH TOÁN\n';
     text += 'Hình thức: ' + optionLabel[state.dining_option] + '\n';
     text += 'SDT: ' + state.phone + '\n';
     if (state.dining_option === 'ship') text += 'Địa chỉ: ' + state.address + '\n';
@@ -134,14 +134,14 @@ async function processNextItemDetail(chatId) {
 
 // AI
 const ABBREVIATIONS = {
-    'ts': 'trà sữa',
-    'tc': 'trân châu',
-    'tcd': 'trân châu đen',
-    'tct': 'trân châu trắng',
+    'ts': 'tra sua',
+    'tc': 'tran chau',
+    'tcd': 'tran chau den',
+    'tct': 'tran chau trang',
     'mt': 'matcha',
-    'cf': 'cà phê',
-    'cp': 'cà phê',
-    'sl': 'sữa chua',
+    'cf': 'ca phe',
+    'cp': 'ca phe',
+    'sl': 'sua chua',
 };
 
 function normalize(str) {
@@ -221,6 +221,11 @@ async function understandOrder(text, currentCart) {
 
         const prompt = `Bạn là AI order trà sữa cực thông minh. Chỉ trả về JSON, không giải thích.
 
+QUY TẮC QUAN TRỌNG:
+- "items" CHỈ chứa các MÓN NƯỚC (trà, cà phê, đá xay...) — KHÔNG được đưa topping vào đây
+- Topping phải đưa vào mảng "toppings" bên trong từng item
+- Ví dụ: "trà xoài thêm nước cốt dừa" → items: [{name:"Trà Xoài", toppings:["Nước Cốt Dừa"]}]
+
 QUY TẮC HIỂU INTENT:
 - Khách nhắn tên món / gọi món → NEW_ORDER
 - Khách nói "thêm", "thêm vào" → MODIFY_ORDER (add_items)
@@ -239,10 +244,10 @@ QUY TẮC VIẾT TẮT (hiểu tự nhiên):
 KHI MODIFY: dùng target_index để chỉ đúng item trong giỏ (dựa vào số thứ tự [i] trong giỏ hiện tại).
 Ví dụ "tăng ly thứ 2 lên 3" → target_index: 1, update_quantity: 3
 
-DANH SÁCH MÓN (dùng tên gần đúng nhất):
+DANH SÁCH MÓN NƯỚC (chỉ những thứ này mới được vào "items"):
 ${menuList}
 
-TOPPING CÓ SẴN: ${toppingList}
+TOPPING CÓ SẴN (chỉ được vào mảng "toppings" trong item, KHÔNG được vào "items"): ${toppingList}
 
 GIỎ HIỆN TẠI:
 ${cartList}
@@ -277,6 +282,7 @@ Trả về JSON (KHÔNG có text thừa, KHÔNG có markdown):
 }
 
 function buildCartFromAI(aiData) {
+    console.log("[DEBUG] AI items:", JSON.stringify(aiData.items));
     const cart = [];
 
     for (const item of aiData.items || []) {
@@ -302,6 +308,7 @@ function buildCartFromAI(aiData) {
         });
     }
 
+    console.log("[DEBUG] Cart built:", JSON.stringify(cart.map(c => ({ name: c.name, size: c.size, qty: c.quantity, topping_ids: c.topping_ids }))));
     return cart;
 }
 
@@ -413,7 +420,7 @@ async function talkAI(prompt) {
 // BOT START COMMAND — chào khi khách mở chat lần đầu
 bot.onText(/\/start/, async (msg) => {
     const chatId = msg.chat.id;
-    if (!userState[chatId]) userState[chatId] = { cart: [], selected_menu_ids: [] };
+    userState[chatId] = { cart: [], selected_menu_ids: [] }; // reset sạch state cũ
 
     const greeting = await talkAI('Khách vừa mở chat với quán lần đầu. Hãy chào đón thật thân thiện và hỏi khách muốn dùng gì.');
     bot.sendMessage(chatId, greeting, {
@@ -484,6 +491,11 @@ bot.on('message', async (msg) => {
     // AI xử lý đặt món
     if (!state.step) {
         const aiData = await understandOrder(text, state.cart || []);
+
+        if (!aiData) {
+            return bot.sendMessage(chatId, 'Mình đang bận xíu, bạn nhắn lại giúp mình nha! 🙏');
+        }
+
         const result = applyAIResult(state, aiData);
 
         if (result === "new" || result === "modify") {
