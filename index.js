@@ -676,7 +676,7 @@ app.post('/payos-webhook', async (req, res) => {
             return console.log("✅ PayOS đã xác nhận Webhook thành công!");
         }
 
-        const webhookData = payos.verifyWebhookData(req.body);
+        const webhookData = payos.verifyPaymentWebhookData(req.body);
         const { orderCode, success } = webhookData;
 
         if (success && pendingOrders[orderCode]) {
