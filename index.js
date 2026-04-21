@@ -709,15 +709,23 @@ loadData().then(async () => {
     const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN
         ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
         : process.env.BASE_URL;
-
+ 
     app.listen(PORT, async () => {
         console.log(`🚀 Server up on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
-
+ 
         if (BASE_URL) {
             const WEBHOOK_URL = `${BASE_URL}/bot${process.env.BOT_TOKEN}`;
             await bot.deleteWebHook();
             await bot.setWebHook(WEBHOOK_URL);
-            console.log(' Webhook set:', WEBHOOK_URL);
+            console.log('Telegram Webhook set:', WEBHOOK_URL);
+ 
+            try {
+                const payosWebhookUrl = `${BASE_URL}/payos-webhook`;
+                await payos.confirmWebhook(payosWebhookUrl);
+                console.log('PayOS Webhook confirmed:', payosWebhookUrl);
+            } catch (err) {
+                console.warn('PayOS Webhook confirm lỗi:', err.message);
+            }
         } else {
             console.warn('BASE_URL chưa set — webhook chưa được đăng ký!');
         }
