@@ -15,7 +15,7 @@ const payos = new PayOS(
     process.env.PAYOS_CHECKSUM_KEY
 );
 
-const bot = new TelegramBot(process.env.BOT_TOKEN, { webHook: true });
+const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
@@ -26,7 +26,7 @@ let toppings = [];
 const userState = {};
 const pendingOrders = {};
 
-//LOAD DATA 
+// LOAD DATA
 function loadData() {
     return new Promise((resolve) => {
         fs.createReadStream('Menu.csv')
@@ -132,7 +132,7 @@ async function processNextItemDetail(chatId) {
     });
 }
 
-// AI 
+// AI
 const ABBREVIATIONS = {
     'ts': 'tra sua',
     'tc': 'tran chau',
@@ -197,13 +197,13 @@ function safeParseJSON(raw) {
             intent: ['NEW_ORDER','MODIFY_ORDER','CANCEL_ORDER','CONFIRM','UNKNOWN'].includes(parsed.intent)
                 ? parsed.intent : 'UNKNOWN',
             items: Array.isArray(parsed.items) ? parsed.items : [],
-            dining_hint: parsed.dining_hint || null, 
+            dining_hint: parsed.dining_hint || null,
             modifications: {
                 replace_index: parsed.modifications?.replace_index ?? null,
                 add_items: Array.isArray(parsed.modifications?.add_items) ? parsed.modifications.add_items : [],
                 remove_index: parsed.modifications?.remove_index ?? null,
                 update_quantity: parsed.modifications?.update_quantity ?? null,
-                target_index: parsed.modifications?.target_index ?? null, 
+                target_index: parsed.modifications?.target_index ?? null,
                 add_topping: parsed.modifications?.add_topping ?? null,
                 remove_topping: parsed.modifications?.remove_topping ?? null,
             }
@@ -318,6 +318,7 @@ function applyAIResult(state, aiData) {
 
     if (aiData.intent === "MODIFY_ORDER") {
         const mod = aiData.modifications || {};
+
         const targetIdx = (mod.target_index !== null && mod.target_index !== undefined && state.cart[mod.target_index])
             ? mod.target_index : 0;
 
@@ -367,7 +368,7 @@ function applyAIResult(state, aiData) {
         return "confirm";
     }
 
-    return null; // UNKNOWN
+    return null;
 }
 
 function sendCartSummary(chatId, cart) {
@@ -409,6 +410,17 @@ async function talkAI(prompt) {
     }
 }
 
+// BOT START COMMAND — chào khi khách mở chat lần đầu
+bot.onText(/\/start/, async (msg) => {
+    const chatId = msg.chat.id;
+    if (!userState[chatId]) userState[chatId] = { cart: [], selected_menu_ids: [] };
+
+    const greeting = await talkAI('Khách vừa mở chat với quán lần đầu. Hãy chào đón thật thân thiện và hỏi khách muốn dùng gì.');
+    bot.sendMessage(chatId, greeting, {
+        reply_markup: { keyboard: [['📋 Menu']], resize_keyboard: true }
+    });
+});
+
 // BOT MESSAGE HANDLER
 bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
@@ -418,7 +430,7 @@ bot.on('message', async (msg) => {
     if (!userState[chatId]) userState[chatId] = { cart: [], selected_menu_ids: [] };
     const state = userState[chatId];
 
-    // Các step đang chờ input text 
+    // Các step đang chờ input text
     if (state.step === 'INPUT_PHONE') {
         if (!/^\d{10,11}$/.test(text.trim())) {
             return bot.sendMessage(chatId, 'Số điện thoại chưa đúng rồi, bạn nhập lại giúp mình nha! (10-11 số)');
@@ -453,7 +465,7 @@ bot.on('message', async (msg) => {
         });
     }
 
-    // Nút menu cứng 
+    // Nút menu cứng
     if (text === '📋 Menu') {
         state.selected_menu_ids = [];
         return bot.sendMessage(chatId, 'Bạn chọn món nào nè:', {
@@ -461,7 +473,7 @@ bot.on('message', async (msg) => {
         });
     }
 
-    // Chào hỏi 
+    // Chào hỏi
     const lower = text.toLowerCase();
     if (lower.includes('xin chào') || lower.includes('hello') || lower.includes('hi ') || lower === 'hi') {
         return bot.sendMessage(chatId, await talkAI(text), {
@@ -469,7 +481,7 @@ bot.on('message', async (msg) => {
         });
     }
 
-    // AI xử lý đặt món 
+    // AI xử lý đặt món
     if (!state.step) {
         const aiData = await understandOrder(text, state.cart || []);
         const result = applyAIResult(state, aiData);
@@ -508,14 +520,13 @@ bot.on('message', async (msg) => {
             });
         }
 
-        // UNKNOWN 
         return bot.sendMessage(chatId, 'Bạn muốn gọi món gì nè? Bạn có thể nhắn tên món hoặc bấm 📋 Menu nha!', {
             reply_markup: { keyboard: [['📋 Menu']], resize_keyboard: true }
         });
     }
 });
 
-// CALLBACK QUERY HANDLER 
+// CALLBACK QUERY HANDLER
 bot.on('callback_query', async (q) => {
     const chatId = q.message.chat.id;
     const data = q.data;
@@ -523,7 +534,7 @@ bot.on('callback_query', async (q) => {
 
     if (!state) return bot.answerCallbackQuery(q.id);
 
-    // AI flow shortcuts 
+    // AI flow shortcuts
     if (data === 'ai_confirm') {
         bot.answerCallbackQuery(q.id);
         if (!state.cart.length) return;
@@ -544,7 +555,7 @@ bot.on('callback_query', async (q) => {
         return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
     }
 
-    // Menu chọn bằng nút 
+    // Menu chọn bằng nút
     if (data.startsWith('sel_menu_')) {
         const id = data.replace('sel_menu_', '');
         const idx = state.selected_menu_ids.indexOf(id);
@@ -564,7 +575,7 @@ bot.on('callback_query', async (q) => {
         processNextItemDetail(chatId);
     }
 
-    // Chọn size 
+    // Chọn size
     if (data.startsWith('size_')) {
         state.temp_item.size = data.replace('size_', '');
         state.temp_item.topping_selected = {};
@@ -599,14 +610,14 @@ bot.on('callback_query', async (q) => {
         }
     }
 
-    // Hình thức dùng 
+    // Hình thức dùng
     if (data.startsWith('opt_')) {
         state.dining_option = data.replace('opt_', '');
         state.step = 'INPUT_PHONE';
         bot.sendMessage(chatId, 'Bạn cho mình xin số điện thoại nha! 📞');
     }
 
-    // Thanh toán 
+    // Thanh toán
     if (data === 'pay_cash' || data === 'pay_cod') {
         state.payment_status = data === 'pay_cash' ? 'cash' : 'cod';
         const orderText = buildFinalOrderText(state);
@@ -673,21 +684,29 @@ app.post('/payos-webhook', async (req, res) => {
     }
 });
 
-// WEBHOOK ENDPOINT 
+// WEBHOOK ENDPOINT
 app.post(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
     bot.processUpdate(req.body);
     res.sendStatus(200);
 });
 
-// START 
+// START
 loadData().then(async () => {
     const PORT = process.env.PORT || 3000;
-    const WEBHOOK_URL = `https://${process.env.RAILWAY_STATIC_URL}/bot${process.env.BOT_TOKEN}`;
+   const BASE_URL = process.env.RAILWAY_PUBLIC_DOMAIN 
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : process.env.BASE_URL;
 
-    await bot.setWebHook(WEBHOOK_URL);
-    console.log('✅ Webhook set:', WEBHOOK_URL);
+    app.listen(PORT, async () => {
+        console.log(`🚀 Server up on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
 
-    app.listen(PORT, () => {
-        console.log(`🚀 Bot Ready on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
+        if (BASE_URL) {
+            const WEBHOOK_URL = `${BASE_URL}/bot${process.env.BOT_TOKEN}`;
+            await bot.deleteWebHook();
+            await bot.setWebHook(WEBHOOK_URL);
+            console.log('✅ Webhook set:', WEBHOOK_URL);
+        } else {
+            console.warn('⚠️  BASE_URL chưa set — webhook chưa được đăng ký!');
+        }
     });
 });
