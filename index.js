@@ -134,14 +134,14 @@ async function processNextItemDetail(chatId) {
 
 // AI
 const ABBREVIATIONS = {
-    'ts': 'tra sua',
-    'tc': 'tran chau',
-    'tcd': 'tran chau den',
-    'tct': 'tran chau trang',
+    'ts': 'trà sữa',
+    'tc': 'trân châu',
+    'tcd': 'trân châu đen',
+    'tct': 'trân châu trắng',
     'mt': 'matcha',
-    'cf': 'ca phe',
-    'cp': 'ca phe',
-    'sl': 'sua chua',
+    'cf': 'cà phê',
+    'cp': 'cà phê',
+    'sl': 'sữa chua',
 };
 
 function normalize(str) {
