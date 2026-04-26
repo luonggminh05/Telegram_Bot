@@ -17,7 +17,7 @@ const payos = new PayOS(
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
 
 const ADMIN_CHAT_ID = "6937078086";
 
@@ -480,15 +480,7 @@ bot.on('message', async (msg) => {
         });
     }
 
-    // Chào hỏi
-    const lower = text.toLowerCase();
-    if (lower.includes('xin chào') || lower.includes('hello') || lower.includes('hi ') || lower === 'hi') {
-        return bot.sendMessage(chatId, await talkAI(text), {
-            reply_markup: { keyboard: [['📋 Menu']], resize_keyboard: true }
-        });
-    }
-
-    // AI xử lý đặt món
+    // AI xử lý tất cả (đặt món, chào hỏi, huỷ...)
     if (!state.step) {
         const aiData = await understandOrder(text, state.cart || []);
 
@@ -532,7 +524,8 @@ bot.on('message', async (msg) => {
             });
         }
 
-        return bot.sendMessage(chatId, 'Bạn muốn gọi món gì nè? Bạn có thể nhắn tên món hoặc bấm 📋 Menu nha!', {
+        // UNKNOWN hoặc chào hỏi → để AI trả lời tự nhiên
+        return bot.sendMessage(chatId, await talkAI(text), {
             reply_markup: { keyboard: [['📋 Menu']], resize_keyboard: true }
         });
     }
