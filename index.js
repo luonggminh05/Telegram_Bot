@@ -17,7 +17,7 @@ const payos = new PayOS(
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 const ADMIN_CHAT_ID = "6937078086";
 
@@ -688,7 +688,7 @@ app.post('/payos-webhook', async (req, res) => {
             const orderText = buildFinalOrderText(stateSnapshot);
 
             bot.sendMessage(chatId, '✅ Thanh toán thành công!\n\n' + orderText);
-            notifyAdmin(orderText, true);
+                notifyAdmin(orderText, true);
 
             delete pendingOrders[orderCode];
             delete userState[chatId];
