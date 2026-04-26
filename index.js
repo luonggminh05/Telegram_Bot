@@ -17,7 +17,7 @@ const payos = new PayOS(
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: false });
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-8b" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
 const ADMIN_CHAT_ID = "6937078086";
 
