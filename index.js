@@ -981,7 +981,7 @@ loadData().then(async () => {
         : process.env.BASE_URL;
  
     app.listen(PORT, async () => {
-        console.log(`🚀 Server up on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
+        console.log(`Server up on port ${PORT} | Menu: ${menu.length} món | Topping: ${toppings.length}`);
  
         if (BASE_URL) {
             const WEBHOOK_URL = `${BASE_URL}/bot${process.env.BOT_TOKEN}`;
