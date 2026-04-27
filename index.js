@@ -198,6 +198,8 @@ function safeParseJSON(raw) {
                 ? parsed.intent : 'UNKNOWN',
             items: Array.isArray(parsed.items) ? parsed.items : [],
             dining_hint: parsed.dining_hint || null,
+            phone: parsed.phone || null,
+            address: parsed.address || null,
             modifications: {
                 replace_index: parsed.modifications?.replace_index ?? null,
                 add_items: Array.isArray(parsed.modifications?.add_items) ? parsed.modifications.add_items : [],
@@ -235,16 +237,28 @@ QUY TẮC HIỂU INTENT:
 - Khách nói "bỏ", "xoá", "không lấy" → MODIFY_ORDER (remove_index)
 - Khách nói "huỷ", "thôi", "không đặt nữa" → CANCEL_ORDER
 - Khách nói "ok", "đặt", "xác nhận", "xong", "vậy đi" → CONFIRM
-- Khách đặt kèm địa chỉ / "ship cho mình" → NEW_ORDER + dining_hint: "ship"
+- Khách đặt kèm địa chỉ / "ship cho mình" / "giao tới" → NEW_ORDER + dining_hint: "ship"
+- Khách nói "ghé qua", "tự đến lấy", "mang đi" → dining_hint: "takeaway"
+- Khách ăn tại quán → dining_hint: "instore"
 - Không hiểu → UNKNOWN
 
 QUY TẮC VIẾT TẮT (hiểu tự nhiên):
 - "ts" = trà sữa, "tc" = trân châu, "tcd"/"tc đen" = trân châu đen
-- "size l"/"ly l"/"l" = size L, mặc định = M
+- "size l"/"ly l"/"l" = size L, KHÔNG nói size = để null (không mặc định M)
 - Số lượng: "2 ly", "3 cái", "x2" đều là quantity
 
 KHI MODIFY size: update_size phải là "L" hoặc "M". Ví dụ "size L đi" → MODIFY_ORDER + update_size: "L", target_index: 0.
 KHI MODIFY quantity: dùng target_index để chỉ đúng item (dựa số thứ tự [i] trong giỏ). Ví dụ "tăng ly thứ 2 lên 3" → target_index: 1, update_quantity: 3.
+
+TRÍCH XUẤT THÔNG TIN KHÁCH:
+- Nếu khách nhắn số điện thoại (10-11 chữ số) → đặt vào "phone"
+- Nếu khách nhắn địa chỉ giao hàng → đặt vào "address"
+- Ví dụ: "ship tới, sdt 0943648249, địa chỉ Đông Hòa, Dĩ An" → dining_hint: "ship", phone: "0943648249", address: "Đông Hòa, Dĩ An"
+
+QUY TẮC SIZE QUAN TRỌNG:
+- Nếu khách KHÔNG đề cập size → để "size": null trong items (KHÔNG điền M)
+- Nếu khách nói "size M" hoặc "ly M" → "size": "M"
+- Nếu khách nói "size L" hoặc "ly L" → "size": "L"
 
 DANH SÁCH MÓN NƯỚC (chỉ những thứ này mới được vào "items"):
 ${menuList}
@@ -260,7 +274,9 @@ Trả về JSON (KHÔNG có text thừa, KHÔNG có markdown):
 {
   "intent": "NEW_ORDER|MODIFY_ORDER|CANCEL_ORDER|CONFIRM|UNKNOWN",
   "dining_hint": null,
-  "items": [{"name":"...","size":"M","quantity":1,"toppings":[]}],
+  "phone": null,
+  "address": null,
+  "items": [{"name":"...","size":null,"quantity":1,"toppings":[]}],
   "modifications": {
     "replace_index": null,
     "add_items": [],
@@ -305,7 +321,7 @@ function buildCartFromAI(aiData) {
             name: menuItem.name,
             price_m: menuItem.price_m,
             price_l: menuItem.price_l,
-            size: item.size === 'L' ? 'L' : 'M',
+            size: item.size === 'L' ? 'L' : item.size === 'M' ? 'M' : null, // null = chưa chọn size
             topping_ids,
             quantity: item.quantity || 1
         });
@@ -323,6 +339,17 @@ function applyAIResult(state, aiData) {
         if (!built.length) return null;
         state.cart = built;
         if (aiData.dining_hint) state.dining_hint = aiData.dining_hint;
+        // Lưu phone và address nếu khách cung cấp trong cùng 1 tin nhắn
+        if (aiData.phone && /^\d{10,11}$/.test(aiData.phone.trim())) {
+            state.phone = aiData.phone.trim();
+        }
+        if (aiData.address) {
+            state.address = aiData.address.trim();
+        }
+        // Nếu có dining_hint → cũng lưu dining_option
+        if (aiData.dining_hint) {
+            state.dining_option = aiData.dining_hint;
+        }
         return "new";
     }
 
@@ -466,6 +493,10 @@ async function askToppings(chatId) {
 
 async function askDining(chatId) {
     const state = userState[chatId];
+    // Nếu đã biết dining_option rồi thì bỏ qua
+    if (state.dining_option) {
+        return proceedAfterTopping(chatId);
+    }
     state.step = 'CHOOSE_DINING_AI';
     return bot.sendMessage(chatId, '🍹 Bạn đặt theo hình thức nào?', {
         reply_markup: {
@@ -475,6 +506,68 @@ async function askDining(chatId) {
             ]]
         }
     });
+}
+
+// Kiểm tra state đã đủ thông tin chưa, nếu đủ thì hỏi thanh toán luôn
+async function proceedAfterTopping(chatId) {
+    const state = userState[chatId];
+
+    // Chưa biết hình thức → hỏi dining
+    if (!state.dining_option) {
+        state.step = 'CHOOSE_DINING_AI';
+        return bot.sendMessage(chatId, '🍹 Bạn đặt theo hình thức nào?', {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '🪣 Ghé qua lấy', callback_data: 'ai_dining_takeaway' },
+                    { text: '🚚 Ship tới nhà', callback_data: 'ai_dining_ship' }
+                ]]
+            }
+        });
+    }
+
+    // Đã biết ship nhưng chưa có phone → hỏi phone
+    if (state.dining_option === 'ship' && !state.phone) {
+        state.step = 'INPUT_PHONE';
+        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại để giao hàng nha! 📞');
+    }
+
+    // Đã biết ship + phone nhưng chưa có address → hỏi address
+    if (state.dining_option === 'ship' && !state.address) {
+        state.step = 'INPUT_ADDRESS';
+        return bot.sendMessage(chatId, 'Bạn cho mình biết địa chỉ giao hàng nha! 📍');
+    }
+
+    // Đã biết takeaway/instore nhưng chưa có phone → hỏi phone
+    if ((state.dining_option === 'takeaway' || state.dining_option === 'instore') && !state.phone) {
+        state.step = 'INPUT_PHONE';
+        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại nha! 📞');
+    }
+
+    // Đã đủ hết → hỏi thanh toán
+    return askPayment(chatId);
+}
+
+async function askPayment(chatId) {
+    const state = userState[chatId];
+    if (state.dining_option === 'ship') {
+        state.step = 'CHOOSE_PAYMENT_SHIP';
+        return bot.sendMessage(chatId, '💳 Bạn muốn thanh toán khi nhận hàng hay chuyển khoản trước?', {
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: '🤝 Khi nhận món (COD)', callback_data: 'pay_cod' },
+                    { text: '💳 Chuyển khoản trước', callback_data: 'pay_transfer' }
+                ]]
+            }
+        });
+    } else {
+        // Takeaway/instore: thanh toán tiền mặt tại quán
+        state.payment_status = 'cash';
+        const orderText = buildFinalOrderText(state);
+        bot.sendMessage(chatId, orderText);
+        bot.sendMessage(chatId, 'Mình nhận đơn rồi nha! Ghé qua lấy đồ nhé ❤️');
+        notifyAdmin(orderText, false);
+        delete userState[chatId];
+    }
 }
 
 async function talkAI(prompt) {
@@ -604,10 +697,9 @@ bot.on('message', async (msg) => {
             await bot.sendMessage(chatId, label);
             await sendCartSummary(chatId, state.cart);
 
-            // Kiểm tra xem các item trong đơn có được nói size chưa
-            // AI mặc định size M khi không nói → hỏi lại size
-            const needSizeCheck = aiData.items && aiData.items.some(item => !item.size || item.size === 'M');
-            if (needSizeCheck && result === 'new') {
+            // Kiểm tra xem các item trong đơn có size chưa (null = chưa nói)
+            const needSizeCheck = state.cart.some(item => !item.size);
+            if (needSizeCheck) {
                 state.ai_size_target = 0;
                 return askSize(chatId);
             }
@@ -704,7 +796,7 @@ bot.on('callback_query', async (q) => {
 
     if (data === 'ai_proceed_dining') {
         bot.answerCallbackQuery(q.id);
-        return askDining(chatId);
+        return proceedAfterTopping(chatId);
     }
 
     // Topping AI flow
@@ -723,22 +815,20 @@ bot.on('callback_query', async (q) => {
     if (data === 'ait_done') {
         bot.answerCallbackQuery(q.id);
         await sendCartSummary(chatId, state.cart);
-        return askDining(chatId);
+        return proceedAfterTopping(chatId);
     }
 
     // Dining AI flow
     if (data === 'ai_dining_takeaway') {
         bot.answerCallbackQuery(q.id);
         state.dining_option = 'takeaway';
-        state.step = 'INPUT_PHONE';
-        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại để đặt lịch nha! 📞');
+        return proceedAfterTopping(chatId);
     }
 
     if (data === 'ai_dining_ship') {
         bot.answerCallbackQuery(q.id);
         state.dining_option = 'ship';
-        state.step = 'INPUT_PHONE';
-        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại để giao hàng nha! 📞');
+        return proceedAfterTopping(chatId);
     }
 
     // Menu chọn bằng nút
