@@ -203,6 +203,7 @@ function safeParseJSON(raw) {
                 add_items: Array.isArray(parsed.modifications?.add_items) ? parsed.modifications.add_items : [],
                 remove_index: parsed.modifications?.remove_index ?? null,
                 update_quantity: parsed.modifications?.update_quantity ?? null,
+                update_size: parsed.modifications?.update_size ?? null,
                 target_index: parsed.modifications?.target_index ?? null,
                 add_topping: parsed.modifications?.add_topping ?? null,
                 remove_topping: parsed.modifications?.remove_topping ?? null,
@@ -229,6 +230,7 @@ QUY TẮC QUAN TRỌNG:
 QUY TẮC HIỂU INTENT:
 - Khách nhắn tên món / gọi món → NEW_ORDER
 - Khách nói "thêm", "thêm vào" → MODIFY_ORDER (add_items)
+- Khách nói "đổi size", "size L", "size M", "lấy size L", "size L đi", "size L cơ" → MODIFY_ORDER + update_size
 - Khách nói "đổi", "thay", "sửa", "tăng", "giảm" → MODIFY_ORDER
 - Khách nói "bỏ", "xoá", "không lấy" → MODIFY_ORDER (remove_index)
 - Khách nói "huỷ", "thôi", "không đặt nữa" → CANCEL_ORDER
@@ -241,8 +243,8 @@ QUY TẮC VIẾT TẮT (hiểu tự nhiên):
 - "size l"/"ly l"/"l" = size L, mặc định = M
 - Số lượng: "2 ly", "3 cái", "x2" đều là quantity
 
-KHI MODIFY: dùng target_index để chỉ đúng item trong giỏ (dựa vào số thứ tự [i] trong giỏ hiện tại).
-Ví dụ "tăng ly thứ 2 lên 3" → target_index: 1, update_quantity: 3
+KHI MODIFY size: update_size phải là "L" hoặc "M". Ví dụ "size L đi" → MODIFY_ORDER + update_size: "L", target_index: 0.
+KHI MODIFY quantity: dùng target_index để chỉ đúng item (dựa số thứ tự [i] trong giỏ). Ví dụ "tăng ly thứ 2 lên 3" → target_index: 1, update_quantity: 3.
 
 DANH SÁCH MÓN NƯỚC (chỉ những thứ này mới được vào "items"):
 ${menuList}
@@ -265,6 +267,7 @@ Trả về JSON (KHÔNG có text thừa, KHÔNG có markdown):
     "remove_index": null,
     "target_index": null,
     "update_quantity": null,
+    "update_size": null,
     "add_topping": null,
     "remove_topping": null
   }
@@ -348,6 +351,10 @@ function applyAIResult(state, aiData) {
             state.cart[targetIdx].quantity = mod.update_quantity;
         }
 
+        if (mod.update_size && state.cart.length) {
+            state.cart[targetIdx].size = mod.update_size.toUpperCase() === 'L' ? 'L' : 'M';
+        }
+
         if (mod.add_topping && state.cart.length) {
             const t = findBestMatch(mod.add_topping, toppings);
             if (t && !state.cart[targetIdx].topping_ids.includes(t.id)) {
@@ -389,20 +396,82 @@ function sendCartSummary(chatId, cart) {
             const t = toppings.find(t => t.id === id);
             return t ? t.name : '';
         }).filter(Boolean);
-
         text += `${i + 1}. ${c.name} (${c.size}) x${c.quantity} — ${formatMoney((c.size === 'L' ? c.price_l : c.price_m) * c.quantity)}\n`;
-        if (toppingNames.length) {
-            text += `   ➕ ${toppingNames.join(', ')}\n`;
-        }
+        if (toppingNames.length) text += `   ➕ ${toppingNames.join(', ')}\n`;
     });
     text += `\n💰 *Tổng: ${formatMoney(calcTotal(cart))}*`;
+    return bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+}
 
-    bot.sendMessage(chatId, text, {
+function buildToppingKeyboardAI(state) {
+    const target = state.cart[state.ai_topping_target || 0] || {};
+    const selected = target.topping_ids || [];
+    const keyboard = [];
+    for (let i = 0; i < toppings.length; i += 2) {
+        const row = [{
+            text: (selected.includes(toppings[i].id) ? '✅ ' : '') + toppings[i].name,
+            callback_data: 'ait_' + toppings[i].id
+        }];
+        if (toppings[i + 1]) row.push({
+            text: (selected.includes(toppings[i + 1].id) ? '✅ ' : '') + toppings[i + 1].name,
+            callback_data: 'ait_' + toppings[i + 1].id
+        });
+        keyboard.push(row);
+    }
+    keyboard.push([
+        { text: '➡️ Xong, tiếp tục', callback_data: 'ait_done' },
+        { text: '🗑️ Huỷ đơn', callback_data: 'ai_cancel' }
+    ]);
+    return keyboard;
+}
+
+async function askSize(chatId) {
+    const state = userState[chatId];
+    // Tìm item đầu tiên chưa có size (hoặc size M mặc định mà cần xác nhận)
+    const item = state.cart[state.ai_size_target || 0];
+    if (!item) return askToppingConfirm(chatId);
+    state.step = 'CHOOSE_SIZE_AI';
+    return bot.sendMessage(chatId, `📏 Bạn muốn lấy *${item.name}* size nào?`, {
         parse_mode: 'Markdown',
         reply_markup: {
             inline_keyboard: [[
-                { text: '✅ Đặt hàng luôn!', callback_data: 'ai_confirm' },
-                { text: '🗑️ Huỷ đơn', callback_data: 'ai_cancel' }
+                { text: `Size M (${formatMoney(item.price_m)})`, callback_data: 'ai_size_M' },
+                { text: `Size L (${formatMoney(item.price_l)})`, callback_data: 'ai_size_L' }
+            ]]
+        }
+    });
+}
+
+async function askToppingConfirm(chatId) {
+    const state = userState[chatId];
+    state.step = 'ASK_TOPPING_CONFIRM';
+    return bot.sendMessage(chatId, '🧋 Bạn có muốn thêm topping không?', {
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '✅ Có, chọn topping', callback_data: 'topping_yes' },
+                { text: '❌ Không cần', callback_data: 'topping_no' }
+            ]]
+        }
+    });
+}
+
+async function askToppings(chatId) {
+    const state = userState[chatId];
+    state.step = 'CHOOSE_TOPPING_AI';
+    state.ai_topping_target = 0;
+    return bot.sendMessage(chatId, '🦹 Bạn chọn topping muốn thêm nha! (bấm vào để chọn)', {
+        reply_markup: { inline_keyboard: buildToppingKeyboardAI(state) }
+    });
+}
+
+async function askDining(chatId) {
+    const state = userState[chatId];
+    state.step = 'CHOOSE_DINING_AI';
+    return bot.sendMessage(chatId, '🍹 Bạn đặt theo hình thức nào?', {
+        reply_markup: {
+            inline_keyboard: [[
+                { text: '🪣 Ghé qua lấy', callback_data: 'ai_dining_takeaway' },
+                { text: '🚚 Ship tới nhà', callback_data: 'ai_dining_ship' }
             ]]
         }
     });
@@ -447,15 +516,13 @@ bot.on('message', async (msg) => {
             state.step = 'INPUT_ADDRESS';
             return bot.sendMessage(chatId, 'Bạn cho mình biết địa chỉ giao hàng nha! 📍');
         } else {
-            state.step = 'CHOOSE_PAYMENT';
-            return bot.sendMessage(chatId, 'Bạn muốn dùng phương thức nào để thanh toán nè?', {
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: '💵 Tiền mặt', callback_data: 'pay_cash' },
-                        { text: '💳 Chuyển khoản', callback_data: 'pay_transfer' }
-                    ]]
-                }
-            });
+            // Ghé qua lấy: không hỏi thanh toán, hoàn tất ngay
+            state.payment_status = 'cash';
+            const orderText = buildFinalOrderText(state);
+            bot.sendMessage(chatId, orderText);
+            bot.sendMessage(chatId, 'Mình nhận đơn rồi nha! Ghé qua lấy đồ nhé ❤️');
+            notifyAdmin(orderText, false);
+            delete userState[chatId];
         }
     }
 
@@ -472,12 +539,54 @@ bot.on('message', async (msg) => {
         });
     }
 
-    // Nút menu cứng
+    // Step: chọn topping sau khi AI tạo đơn
+    if (state.step === 'CHOOSE_TOPPING_AI') {
+        // Cho phép sửa đơn bằng text trong lúc chọn topping
+        const aiData = await understandOrder(text, state.cart || []);
+        if (aiData && (aiData.intent === 'MODIFY_ORDER' || aiData.intent === 'CANCEL_ORDER')) {
+            const result = applyAIResult(state, aiData);
+            if (result === 'cancel') {
+                state.step = null;
+                return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
+            }
+            if (result === 'modify') {
+                await sendCartSummary(chatId, state.cart);
+                return askToppings(chatId);
+            }
+        }
+        return; // bỏ qua các tin nhắn khác khi đang chọn topping
+    }
+
+    // Bấm Menu cứng
     if (text === '📋 Menu') {
         state.selected_menu_ids = [];
         return bot.sendMessage(chatId, 'Bạn chọn món nào nè:', {
             reply_markup: { inline_keyboard: renderMenuKeyboard(state) }
         });
+    }
+
+    // Step: đang chờ chọn size qua AI flow
+    if (state.step === 'CHOOSE_SIZE_AI') {
+        // Cho phép huỷ bằng text
+        const aiData = await understandOrder(text, state.cart || []);
+        if (aiData && aiData.intent === 'CANCEL_ORDER') {
+            state.cart = [];
+            state.step = null;
+            return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
+        }
+        return; // bỏ qua các tin nhắn khác khi đang chọn size
+    }
+
+    // Step: đang chờ xác nhận topping
+    if (state.step === 'ASK_TOPPING_CONFIRM') {
+        // Cho phép huỷ bằng text
+        const aiData = await understandOrder(text, state.cart || []);
+        if (aiData && aiData.intent === 'CANCEL_ORDER') {
+            state.cart = [];
+            state.step = null;
+            return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
+        }
+        return; // bỏ qua các tin nhắn khác khi đang chọn
     }
 
     // AI xử lý tất cả (đặt món, chào hỏi, huỷ...)
@@ -493,16 +602,17 @@ bot.on('message', async (msg) => {
         if (result === "new" || result === "modify") {
             const label = result === "new" ? "Mình hiểu bạn gọi món rồi nè 👇" : "Mình cập nhật đơn cho bạn nha 👇";
             await bot.sendMessage(chatId, label);
+            await sendCartSummary(chatId, state.cart);
 
-            if (state.dining_hint === 'ship') {
-                await sendCartSummary(chatId, state.cart);
-                state.dining_option = 'ship';
-                state.step = 'INPUT_PHONE';
-                state.dining_hint = null;
-                return bot.sendMessage(chatId, '🚚 Mình sẽ ship cho bạn nha! Cho mình xin số điện thoại với 📞');
+            // Kiểm tra xem các item trong đơn có được nói size chưa
+            // AI mặc định size M khi không nói → hỏi lại size
+            const needSizeCheck = aiData.items && aiData.items.some(item => !item.size || item.size === 'M');
+            if (needSizeCheck && result === 'new') {
+                state.ai_size_target = 0;
+                return askSize(chatId);
             }
 
-            return sendCartSummary(chatId, state.cart);
+            return askToppingConfirm(chatId);
         }
 
         if (result === "cancel") {
@@ -541,23 +651,94 @@ bot.on('callback_query', async (q) => {
 
     // AI flow shortcuts
     if (data === 'ai_confirm') {
+        // Legacy: redirect to topping step
         bot.answerCallbackQuery(q.id);
         if (!state.cart.length) return;
-        return bot.sendMessage(chatId, 'Bạn muốn dùng tại quán, mang đi hay ship nè? 😊', {
+        return askToppingConfirm(chatId);
+    }
+
+    if (data === 'ai_cancel') {
+        state.cart = [];
+        state.step = null;
+        bot.answerCallbackQuery(q.id, { text: 'Đã huỷ đơn!' });
+        return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
+    }
+
+    // Chọn size trong AI flow
+    if (data === 'ai_size_M' || data === 'ai_size_L') {
+        bot.answerCallbackQuery(q.id);
+        const size = data === 'ai_size_L' ? 'L' : 'M';
+        const target = state.ai_size_target || 0;
+        if (state.cart[target]) {
+            state.cart[target].size = size;
+        }
+        state.step = null;
+        // Tiếp tục hỏi size các item còn lại (nếu có)
+        state.ai_size_target = target + 1;
+        if (state.ai_size_target < state.cart.length) {
+            return askSize(chatId);
+        }
+        state.ai_size_target = 0;
+        return askToppingConfirm(chatId);
+    }
+
+    // Xác nhận topping
+    if (data === 'topping_yes') {
+        bot.answerCallbackQuery(q.id);
+        return askToppings(chatId);
+    }
+
+    if (data === 'topping_no') {
+        bot.answerCallbackQuery(q.id);
+        state.step = null;
+        await sendCartSummary(chatId, state.cart);
+        return bot.sendMessage(chatId, 'Bạn xác nhận đặt hàng chứ?', {
             reply_markup: {
                 inline_keyboard: [[
-                    { text: '🪑 Tại quán', callback_data: 'opt_instore' },
-                    { text: '🥡 Mang đi', callback_data: 'opt_takeaway' },
-                    { text: '🚚 Đặt ship', callback_data: 'opt_ship' }
+                    { text: '✅ Đặt hàng luôn!', callback_data: 'ai_proceed_dining' },
+                    { text: '🗑️ Huỷ đơn', callback_data: 'ai_cancel' }
                 ]]
             }
         });
     }
 
-    if (data === 'ai_cancel') {
-        state.cart = [];
-        bot.answerCallbackQuery(q.id, { text: 'Đã huỷ đơn!' });
-        return bot.sendMessage(chatId, 'Đơn đã huỷ nha 😢 Bạn muốn gọi lại không?');
+    if (data === 'ai_proceed_dining') {
+        bot.answerCallbackQuery(q.id);
+        return askDining(chatId);
+    }
+
+    // Topping AI flow
+    if (data.startsWith('ait_') && data !== 'ait_done') {
+        const id = data.replace('ait_', '');
+        const targetItem = state.cart[state.ai_topping_target || 0];
+        if (targetItem) {
+            const idx = targetItem.topping_ids.indexOf(id);
+            if (idx > -1) targetItem.topping_ids.splice(idx, 1);
+            else targetItem.topping_ids.push(id);
+            bot.editMessageReplyMarkup({ inline_keyboard: buildToppingKeyboardAI(state) }, { chat_id: chatId, message_id: q.message.message_id });
+        }
+        return bot.answerCallbackQuery(q.id);
+    }
+
+    if (data === 'ait_done') {
+        bot.answerCallbackQuery(q.id);
+        await sendCartSummary(chatId, state.cart);
+        return askDining(chatId);
+    }
+
+    // Dining AI flow
+    if (data === 'ai_dining_takeaway') {
+        bot.answerCallbackQuery(q.id);
+        state.dining_option = 'takeaway';
+        state.step = 'INPUT_PHONE';
+        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại để đặt lịch nha! 📞');
+    }
+
+    if (data === 'ai_dining_ship') {
+        bot.answerCallbackQuery(q.id);
+        state.dining_option = 'ship';
+        state.step = 'INPUT_PHONE';
+        return bot.sendMessage(chatId, 'Cho mình xin số điện thoại để giao hàng nha! 📞');
     }
 
     // Menu chọn bằng nút
